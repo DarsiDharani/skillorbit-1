@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""
+load_manager_employee.py
+
+Reads 'manager_mapping.json' (which must have the format):
+
+{
+  "Sundara Nagaveera Venkata Satish": {
+      "EmpID": 5504763,
+      "TeamMembers": [
+          { "EmpID": 5504589, "EmpName": "Abhilash Kohir" },
+          { "EmpID": 5502673, "EmpName": "Anand Raghava Byroju" },
+          ...
+      ]
+  },
+  "Raja Shekhar Boora": {
+      "EmpID": 550YYYY,
+      "TeamMembers": [
+          { "EmpID": 550ZZZZ, "EmpName": "Prabhakar Reddy Nayeni" },
+          ...
+      ]
+  },
+  "Das Kritisundar": {
+      "EmpID": 550AAAA,
+      "TeamMembers": [
+          { "EmpID": 550BBBB, "EmpName": "Ramya Keerthi Vimmigari" },
+          ...
+      ]
+  }
+}
+
+And inserts each (manager_empid, manager_name, employee_empid, employee_name) row
+into a PostgreSQL table named 'manager_employee', skipping any null EmpIDs.
+"""
+
+import json
+import psycopg2
+from psycopg2.extras import execute_values
+
+# ────────────────────────────────────────────────────────────────────────────────
+# 1) Adjust these connection settings to match your Postgres instance:
+# ────────────────────────────────────────────────────────────────────────────────
+PG_HOST     = "localhost"
+PG_PORT     = 5432
+PG_DATABASE = "postgres"
+PG_USER     = "postgres"
+PG_PASSWORD = "postgres"
+
+# The JSON file we created in the previous step:
+MANAGER_MAPPING_JSON = "manager_mapping.json"
+
+# ────────────────────────────────────────────────────────────────────────────────
+# END CONFIGURATION
+# ────────────────────────────────────────────────────────────────────────────────
+
+
+def load_manager_mapping(path: str) -> dict:
+    """
+    Read manager_mapping.json from disk and return the parsed dictionary.
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data
+
+
+def flatten_for_insertion(mapping: dict) -> list:
+    """
+    Given the manager→{EmpID, TeamMembers:[{EmpID,EmpName}, …]} dictionary,
+    produce a flat list of tuples ready for insertion:
+
+       [
+         (manager_empid, manager_name, employee_empid, employee_name),
+         ...
+       ]
+
+    Skip any entry (manager or member) whose EmpID is missing or None.
+    """
+    rows = []
+    for manager_name, mgr_info in mapping.items():
+        mgr_id = mgr_info.get("EmpID")
+        # Skip if manager_empid is missing or null
+        if mgr_id is None:
+            print(f" → Skipping manager '{manager_name}' (EmpID is null).")
+            continue
+
+        team_members = mgr_info.get("TeamMembers", [])
+        for member in team_members:
+            mem_id = member.get("EmpID")
+            mem_name = member.get("EmpName")
+            # Skip if member_empid is missing or null
+            if mem_id is None:
+                print(f"   → Skipping team‐member '{mem_name}' (EmpID is null) under manager '{manager_name}'.")
+                continue
+
+            # All fields are non-null; collect for bulk insert
+            rows.append((mgr_id, manager_name, mem_id, mem_name))
+
+    return rows
+
+
+def create_table_if_not_exists(conn):
+    """
+    Ensure that the 'manager_employee' table exists.
+    (You can skip this if you already ran the DDL manually.)
+    """
+    create_ddl = """
+    CREATE TABLE manager_employee (
+	manager_empid VARCHAR NOT NULL, 
+	manager_name TEXT NOT NULL, 
+	employee_empid VARCHAR NOT NULL, 
+	employee_name TEXT NOT NULL, 
+	PRIMARY KEY (manager_empid, employee_empid)
+);
+    """
+    with conn.cursor() as cur:
+        cur.execute(create_ddl)
+    conn.commit()
+
+
+def insert_rows(conn, rows: list):
+    """
+    Perform a bulk INSERT of all rows into manager_employee.
+    Uses psycopg2.extras.execute_values for efficiency.
+    """
+    if not rows:
+        print(" → No valid rows to insert.")
+        return
+
+    sql = """
+    INSERT INTO manager_employee (manager_empid, manager_name, employee_empid, employee_name)
+    VALUES %s
+    ON CONFLICT (manager_empid, employee_empid) DO NOTHING
+    """  # DO NOTHING on primary‐key conflict
+    with conn.cursor() as cur:
+        execute_values(cur, sql, rows)
+    conn.commit()
+    print(f" → Inserted {len(rows)} rows into 'manager_employee'.")
+
+
+def main():
+    # 1) Load the JSON from disk
+    print("Loading JSON from:", MANAGER_MAPPING_JSON)
+    manager_mapping = load_manager_mapping(MANAGER_MAPPING_JSON)
+
+    # 2) Flatten into a list of 4‐tuples, skipping null EmpIDs
+    rows_to_insert = flatten_for_insertion(manager_mapping)
+    print(f"Prepared {len(rows_to_insert)} rows (after skipping null EmpIDs).")
+
+    # 3) Connect to PostgreSQL
+    conn = psycopg2.connect(
+        host=PG_HOST,
+        port=PG_PORT,
+        dbname=PG_DATABASE,
+        user=PG_USER,
+        password=PG_PASSWORD
+    )
+    print("Connected to PostgreSQL.")
+
+    try:
+        # 4) (Optional) Create table if it doesn't exist
+        create_table_if_not_exists(conn)
+
+        # 5) Bulk‐insert all rows
+        insert_rows(conn, rows_to_insert)
+
+    finally:
+        conn.close()
+        print("Connection closed.")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""
+extract_and_map_employees_with_ids.py
+
+1) Reads an Excel file containing at least these two columns:
+     - 'Employee e ID'
+     - 'Employee Name'
+   (we preserve employee names exactly as in the sheet for employees.json)
+2) Dumps a JSON file of all unique employees (ID + Name) → employees.json
+3) Builds a manager→{ EmpID, TeamMembers:[{EmpID,EmpName}, … ] } mapping.
+   For any team‐member under Satish or Raja Boora, rotate their name tokens
+   so that "Last First" → "First Last", or more generally "A B C" → "B C A".
+4) Dumps that mapping to manager_mapping.json
+"""
+
+import pandas as pd
+import json
+import os
+
+# ────────────────────────────────────────────────────────────────────────────────
+# CONFIGURATION (adjust paths + sheet names as needed)
+# ────────────────────────────────────────────────────────────────────────────────
+
+INPUT_EXCEL_FILE    = "C:\\Users\\Z0194393\\Downloads\\Skill Orbit Data.xlsx"  # your Excel file path
+INPUT_SHEET_NAME    = "Employee Competency"      # sheet with columns: 'Employee e ID', 'Employee Name'
+
+# Output JSON files:
+OUTPUT_EMP_JSON     = "employees.json"
+OUTPUT_MAP_JSON     = "manager_mapping.json"
+
+# Managers for whom we want to "rotate" their team members' names:
+MANAGERS_TO_ROTATE_MEMBERS = {
+    "Sundara Nagaveera Venkata Satish",
+    "Raja Shekhar Boora",
+}
+
+# Raw manager→[list of direct‐report names] (as you provided):
+# We will look up each name in the Excel data to fetch EmpID.
+MANAGER_EMP_MAPPING_RAW = {
+    "Sundara Nagaveera Venkata Satish": [
+        "Kohir Abhilash",
+        "Byroju Anand Raghava",
+        "Battula Vijay Kumar",
+        "Kokku Munilakshmi Bharathi",
+        "Jawed Sharib",
+    ],
+    "Raja Shekhar Boora": [
+        "Nayeni Prabhakar Reddy",
+        "Modumudi Harshitha",
+        "Narayana Ravi Teja",
+        "Chandra Santhi",
+        "Vemulapati Chetan Kumar",
+        "Hari T S",
+        "Krishnareddy Sai Saketh",
+        "Aavula Varalakshmi",
+    ],
+    "Das Kritisundar": [
+        "Ramya Keerthi Vimmigari",
+        "Bhusa Lakshmi Prasanna",
+        "Sairam Peddi",
+        "Rohan Pandit",
+        "Sruthi Gattu",
+        "Kankatala Viswanth Manikanta",
+        "Sohail Shaik",
+        "Likhitha Pilli",
+        "Pooja K Gadi",
+        "Tanvi Sahu",
+        "Sri Sai Chandhana Burla",
+        "Pechetti Chandana",
+        "Faheem Mohammad",
+        "Prachi Subhash Yenugwar",
+        "Ganta Sneha",
+        "Vishal Bathini",
+        "Suresh Pandi P",
+        "Manjunath Kodipeta",
+        "Arun Peddi",
+        "Santhosh Pendyala",
+        "Kaushik N",
+        "Matte Kiran Kumar",
+        "Ratnaprabha Kasde",
+        "Srilakshmi Sowjanya Kommoju",
+        "Kranthi Kumar Moparthy",
+        "Jagadeesh Reddy Guddeti",
+        "Shaik Sameer",
+    ],
+}
+
+# ────────────────────────────────────────────────────────────────────────────────
+# END CONFIGURATION
+# ────────────────────────────────────────────────────────────────────────────────
+
+
+def rotate_left_one(name: str) -> str:
+    """
+    Split a name on whitespace; move the first token to the end.
+    e.g. "Vemulapati Chetan Kumar" → ["Vemulapati","Chetan","Kumar"] → ["Chetan","Kumar","Vemulapati"] → "Chetan Kumar Vemulapati"
+         "Kohir Abhilash"            → ["Kohir","Abhilash"] → ["Abhilash","Kohir"] → "Abhilash Kohir"
+    If there's only one token, return it unchanged.
+    """
+    tokens = name.strip().split()
+    if len(tokens) < 2:
+        return name.strip()
+    rotated = tokens[1:] + [tokens[0]]
+    return " ".join(rotated)
+
+
+def extract_unique_employees(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Given a DataFrame with columns 'Employee e ID' and 'Employee Name',
+    return a new DataFrame of unique (EmpID, EmpName) pairs, exactly as in the sheet.
+    """
+    tmp = df[["Employee ID", "Employee Name"]].copy()
+    tmp.columns = ["EmpID", "EmpName"]
+    tmp = tmp.drop_duplicates().reset_index(drop=True)
+    return tmp
+
+
+def build_name_to_id_map(df_emps: pd.DataFrame) -> dict:
+    """
+    Build a lookup dictionary: original_name (string) → EmpID (int).
+    We assume each Employee Name in the Excel sheet is unique; if not, you'd need
+    a more robust way (e.g. combine ID+Name in the key). For now:
+      { "Kohir Abhilash": 5504589, "Vemulapati Chetan Kumar": 550XXXX, … }
+    """
+    return dict(zip(df_emps["EmpName"].tolist(), df_emps["EmpID"].tolist()))
+
+
+def build_manager_mapping_with_ids(name_to_id: dict) -> dict:
+    """
+    Take MANAGER_EMP_MAPPING_RAW and produce a mapping of the form:
+
+    {
+      "<ManagerName>": {
+         "EmpID": <manager_empid>,
+         "TeamMembers": [
+             { "EmpID": <id1>, "EmpName": "<rotated/original name1>" },
+             { "EmpID": <id2>, "EmpName": "<rotated/original name2>" },
+              …
+         ]
+      },
+      … (next manager) …
+    }
+
+    - ManagerName is used verbatim as the key.
+    - Manager's EmpID is fetched from name_to_id[ManagerName].
+    - For each direct‐report name (raw_name) in MANAGER_EMP_MAPPING_RAW[ManagerName]:
+        • member_id = name_to_id[raw_name]   (lookup from the Excel sheet)
+        • if ManagerName ∈ MANAGERS_TO_ROTATE_MEMBERS, do EmpName = rotate_left_one(raw_name)
+          else EmpName = raw_name (unmodified).
+        • append { "EmpID": member_id, "EmpName": EmpName } to the "TeamMembers" list.
+    """
+    final_map = {}
+    for mgr_name, raw_members in MANAGER_EMP_MAPPING_RAW.items():
+        mgr_name_str = mgr_name.strip()
+        # Look up manager's own EmpID
+        mgr_id = name_to_id.get(mgr_name_str, None)
+        if mgr_id is None:
+            print(f"WARNING: Could not find EmpID for manager '{mgr_name_str}' in Excel sheet.")
+        team_list = []
+        for raw_mem in raw_members:
+            raw_mem_str = raw_mem.strip()
+            mem_id = name_to_id.get(raw_mem_str, None)
+            if mem_id is None:
+                print(f"WARNING: Could not find EmpID for member '{raw_mem_str}' under manager '{mgr_name_str}'.")
+            # Decide whether to rotate this member's name or leave it
+            if mgr_name_str in MANAGERS_TO_ROTATE_MEMBERS:
+                displayed_name = rotate_left_one(raw_mem_str)
+            else:
+                displayed_name = raw_mem_str
+            team_list.append({
+                "EmpID": mem_id,
+                "EmpName": displayed_name
+            })
+        final_map[mgr_name_str] = {
+            "EmpID": mgr_id,
+            "TeamMembers": team_list
+        }
+    return final_map
+
+
+def main():
+    # 1) Load the Excel file
+    if not os.path.isfile(INPUT_EXCEL_FILE):
+        raise FileNotFoundError(f"Error: could not find '{INPUT_EXCEL_FILE}' in the working directory.")
+    print(f"Loading Excel file '{INPUT_EXCEL_FILE}' (sheet '{INPUT_SHEET_NAME}') …")
+    df_all = pd.read_excel(INPUT_EXCEL_FILE, sheet_name=INPUT_SHEET_NAME, engine="openpyxl")
+
+    # 2) Extract every unique (EmpID, EmpName) pair, exactly as-is:
+    df_emps = extract_unique_employees(df_all)
+    print(f"  → Found {len(df_emps)} unique employees (no name-rotation at this stage).")
+
+    # 3) Build a lookup: original_name → EmpID
+    name_to_id = build_name_to_id_map(df_emps)
+
+    # 4) Write out employees.json (flat list of all employees)
+    emp_list = df_emps.to_dict(orient="records")
+    with open(OUTPUT_EMP_JSON, "w", encoding="utf-8") as f:
+        json.dump(emp_list, f, ensure_ascii=False, indent=2)
+    print(f"  → Wrote {len(emp_list)} employees to '{OUTPUT_EMP_JSON}'.")
+
+    # 5) Build manager→{EmpID,TeamMembers:[…]} mapping, rotating only under specified managers
+    manager_map = build_manager_mapping_with_ids(name_to_id)
+
+    # 6) Write out manager_mapping.json
+    with open(OUTPUT_MAP_JSON, "w", encoding="utf-8") as f:
+        json.dump(manager_map, f, ensure_ascii=False, indent=2)
+    print(f"  → Wrote manager→members mapping (with EmpIDs) to '{OUTPUT_MAP_JSON}'.")
+
+    print("Done.")
+
+
+if __name__ == "__main__":
+    main()

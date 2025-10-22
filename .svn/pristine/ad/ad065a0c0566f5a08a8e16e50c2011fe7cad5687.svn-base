@@ -1,0 +1,192 @@
+from io import BytesIO
+
+import openpyxl
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List
+from sqlalchemy import select
+from app.db.models import EmployeeCompetency
+from app.db.deps import get_db
+from app.deps import get_current_user
+from fastapi.responses import StreamingResponse
+from app.crud.competency import (
+    get_comp_by_id,
+    get_all_competencies_for_emps,
+    create_competency,
+    update_competency,
+    delete_competency,
+    get_competency_by_id,
+)
+from app.schemas.competency import CompetencyCreate, CompetencyUpdate, CompetencyOut, BatchSaveRequest
+
+router = APIRouter(prefix="/competencies", tags=["competency"])
+
+
+@router.get("/")
+async def read_competencies(
+        db: AsyncSession = Depends(get_db),
+        current_user: dict = Depends(get_current_user),
+):
+    role = current_user["role"]
+    empid = current_user["username"]
+    direct_reports = current_user["direct_reports"]  # list of dicts
+
+    if role == "manager":
+        # Build list of employee IDs: manager + direct reports
+        empid_list = [empid] + [d["employee_empid"] for d in direct_reports]
+        results = await get_all_competencies_for_emps(db, empid_list)
+    else:
+        results = await get_all_competencies_for_emps(db, [empid])
+
+    return {
+        "user": current_user,
+        "competencies": results,
+    }
+
+
+@router.post("/batch", status_code=status.HTTP_200_OK, response_model=List[CompetencyOut])
+async def batch_save_competencies(
+        payload: BatchSaveRequest,
+        db: AsyncSession = Depends(get_db),
+        current_user: dict = Depends(get_current_user),
+):
+    # DELETE phase
+    for comp_id in payload.delete:
+        obj = await get_competency_by_id(db, comp_id)
+        if not obj:
+            continue
+        await delete_competency(db, obj)
+
+    # CREATE phase
+    for comp_in in payload.create:
+        await create_competency(db, comp_in)
+
+    # UPDATE phase
+    for comp_in in payload.update:
+        existing = await get_competency_by_id(db, comp_in.id)
+        if not existing:
+            continue
+        await update_competency(db, existing, comp_in)
+
+    # Fetch and return updated list for this user/manager
+    user_empid = current_user["username"]
+    direct_reports = current_user["direct_reports"]
+
+    if current_user["role"] == "manager":
+        allowed_ids = set(direct_reports + [user_empid])
+        result = await db.execute(
+            select(EmployeeCompetency).filter(EmployeeCompetency.employee_empid.in_(allowed_ids))
+        )
+        results = result.scalars().all()
+    else:
+        result = await db.execute(
+            select(EmployeeCompetency).filter(EmployeeCompetency.employee_empid == user_empid)
+        )
+        results = result.scalars().all()
+
+    return results
+
+
+@router.put("/{comp_id}", response_model=CompetencyOut)
+async def update_existing_competency(
+        *,
+        comp_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user: dict = Depends(get_current_user),
+        obj_in: CompetencyUpdate,
+):
+    comp_db = await get_comp_by_id(db, comp_id)
+    if not comp_db:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if current_user["role"] != "manager":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only managers may update.")
+
+    mgr_id = current_user["username"]
+    direct_reports = current_user["direct_reports"]
+    if comp_db.employee_empid not in direct_reports and comp_db.employee_empid != mgr_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot update this record.")
+
+    return await update_competency(db, comp_db, obj_in)
+
+
+@router.delete("/{comp_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_competency_record(
+        *,
+        comp_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user: dict = Depends(get_current_user),
+):
+    comp_db = await get_comp_by_id(db, comp_id)
+    if not comp_db:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    if current_user["role"] != "manager":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only managers may delete.")
+
+    mgr_id = current_user["username"]
+    direct_reports = current_user["direct_reports"]
+    if comp_db.employee_empid not in direct_reports and comp_db.employee_empid != mgr_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete this record.")
+
+    await delete_competency(db, comp_db)
+    return
+
+
+@router.get("/export-manager-data")
+async def export_manager_data(db: AsyncSession = Depends(get_db), current_user: dict = Depends(get_current_user)):
+    empid = current_user["username"]
+    direct_reports = current_user["direct_reports"]  # list of dicts
+    if not direct_reports:
+        raise HTTPException(status_code=404, detail="Not a Manager")
+    # Build list of employee IDs: manager + direct reports
+    empid_list = [d["employee_empid"] for d in direct_reports]
+    records = await get_all_competencies_for_emps(db, empid_list)
+
+    if not records:
+        raise HTTPException(status_code=404, detail="Manager data not found")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Competency Records"
+
+    headers = [
+        "Employee ID",
+        "Employee Name",
+        "Division",
+        "Role Specific Competency",
+        "Competency",
+        "Skill",
+        "Current Expertise",
+        "Target Expertise"
+    ]
+
+    # 📄 Create Excel workbook
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Competency Records"
+    ws.append(headers)
+
+    for r in records:
+        ws.append([
+            r.employee_empid,
+            r.employee_name,
+            r.division,
+            r.role_specific_comp,
+            r.competency,
+            r.skill,
+            r.current_expertise,
+            r.target_expertise
+        ])
+
+    stream = BytesIO()
+    wb.save(stream)
+    stream.seek(0)
+
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename=employee_competency_{empid}.xlsx"
+        }
+    )

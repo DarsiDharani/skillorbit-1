@@ -1,0 +1,29 @@
+# backend/app/schemas/competency.py
+
+from typing import List, Optional
+from datetime import date
+from pydantic import BaseModel
+
+class CompetencyBase(BaseModel):
+    employee_empid: str
+    employee_name:  Optional[str]
+    division:       Optional[str]
+    role_specific_comp: Optional[str]
+    competency:     Optional[str]
+    skill:          Optional[str]
+    current_expertise: Optional[str]
+    target_expertise: Optional[str]
+
+class CompetencyCreate(CompetencyBase):
+    pass
+
+class CompetencyUpdate(CompetencyBase):
+    id: int
+
+class CompetencyOut(CompetencyBase):
+    id: int
+
+class BatchSaveRequest(BaseModel):
+    create: List[CompetencyCreate] = []
+    update: List[CompetencyUpdate] = []
+    delete: List[int] = []

@@ -1,0 +1,29 @@
+/* src/app/components/competency-list/competency-list.component.css */
+
+/* Make the sidebar links stand out */
+.nav-link.active {
+  background-color: #e9ecef;
+  font-weight: bold;
+}
+
+/* Optionally give the table header a distinct background */
+table thead {
+  background-color: #f8f9fa;
+}
+
+/* Ensure no unwanted horizontal scrollbar */
+table {
+  width: 100%;
+  table-layout: fixed;
+}
+button.btn-secondary:disabled {
+  background-color: #6c757d; /* default Bootstrap secondary color */
+  opacity: 0.5; /* make it lighter */
+  cursor: not-allowed;
+  color: #ccc; /* change text color */
+}
+
+button.btn-secondary:not(:disabled) {
+  background-color: #007bff; /* change enabled color, e.g. blue */
+  color: white;
+}

@@ -1,0 +1,59 @@
+﻿
+import { Component, OnInit } from "@angular/core";
+import { FormGroup, FormBuilder, Validators } from "@angular/forms";
+import { AuthService } from "../../services/auth.service";
+
+@Component({
+  selector: "app-request-reset",
+  templateUrl: "./request-reset.component.html",
+})
+export class RequestResetComponent implements OnInit {
+  requestForm!: FormGroup;
+  isSubmitted = false;
+  message = "";
+  errorMsg = "";
+
+  constructor(private fb: FormBuilder, private authService: AuthService) {}
+
+  ngOnInit(): void {
+    this.requestForm = this.fb.group(
+      {
+        username: ["", [Validators.required]],
+        newPassword: ["", [Validators.required, Validators.minLength(6)]],
+        confirmNewPassword: ["", [Validators.required]],
+      },
+      { validator: this.passwordMatchValidator }
+    );
+  }
+
+  passwordMatchValidator(form: FormGroup) {
+    return form.get("newPassword")!.value ===
+      form.get("confirmNewPassword")!.value
+      ? null
+      : { mismatch: true };
+  }
+
+  get f() {
+    return this.requestForm.controls;
+  }
+
+  onSubmit(): void {
+    this.isSubmitted = true;
+    this.message = "";
+    this.errorMsg = "";
+  
+    if (this.requestForm.invalid) {
+      return;
+    }
+  
+    const { username, newPassword } = this.requestForm.value;
+    this.authService.resetPasswordDirect(username, newPassword).subscribe({
+      next: (res: any) => {
+        this.message = res.msg || "Password reset successful.";
+      },
+      error: (err) => {
+        this.errorMsg = err.error.detail || "Failed to reset password.";
+      },
+    });
+  }
+}

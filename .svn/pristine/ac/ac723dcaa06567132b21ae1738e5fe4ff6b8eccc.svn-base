@@ -1,0 +1,177 @@
+{
+  "Sundara Nagaveera Venkata Satish": {
+    "EmpID": 5504763,
+    "TeamMembers": [
+      {
+        "EmpID": 5504589,
+        "EmpName": "Abhilash Kohir"
+      },
+      {
+        "EmpID": 5502673,
+        "EmpName": "Anand Raghava Byroju"
+      },
+      {
+        "EmpID": 5504572,
+        "EmpName": "Vijay Kumar Battula"
+      },
+      {
+        "EmpID": 5503409,
+        "EmpName": "Munilakshmi Bharathi Kokku"
+      },
+      {
+        "EmpID": 5503411,
+        "EmpName": "Sharib Jawed"
+      }
+    ]
+  },
+  "Raja Shekhar Boora": {
+    "EmpID": 5500909,
+    "TeamMembers": [
+      {
+        "EmpID": 5504943,
+        "EmpName": "Prabhakar Reddy Nayeni"
+      },
+      {
+        "EmpID": 5502819,
+        "EmpName": "Harshitha Modumudi"
+      },
+      {
+        "EmpID": null,
+        "EmpName": "Ravi Teja Narayana"
+      },
+      {
+        "EmpID": 5502934,
+        "EmpName": "Santhi Chandra"
+      },
+      {
+        "EmpID": 5503932,
+        "EmpName": "Chetan Kumar Vemulapati"
+      },
+      {
+        "EmpID": null,
+        "EmpName": "T S Hari"
+      },
+      {
+        "EmpID": null,
+        "EmpName": "Sai Saketh Krishnareddy"
+      },
+      {
+        "EmpID": 5503496,
+        "EmpName": "Varalakshmi Aavula"
+      }
+    ]
+  },
+  "Das Kritisundar": {
+    "EmpID": 4400457,
+    "TeamMembers": [
+      {
+        "EmpID": 5500284,
+        "EmpName": "Ramya Keerthi Vimmigari"
+      },
+      {
+        "EmpID": 5503461,
+        "EmpName": "Bhusa Lakshmi Prasanna"
+      },
+      {
+        "EmpID": 5504548,
+        "EmpName": "Sairam Peddi"
+      },
+      {
+        "EmpID": 5504600,
+        "EmpName": "Rohan Pandit"
+      },
+      {
+        "EmpID": 5504290,
+        "EmpName": "Sruthi Gattu"
+      },
+      {
+        "EmpID": 5503493,
+        "EmpName": "Kankatala Viswanth Manikanta"
+      },
+      {
+        "EmpID": 5504302,
+        "EmpName": "Sohail Shaik"
+      },
+      {
+        "EmpID": 5502571,
+        "EmpName": "Likhitha Pilli"
+      },
+      {
+        "EmpID": 5503982,
+        "EmpName": "Pooja K Gadi"
+      },
+      {
+        "EmpID": 5502500,
+        "EmpName": "Tanvi Sahu"
+      },
+      {
+        "EmpID": 5502435,
+        "EmpName": "Sri Sai Chandhana Burla"
+      },
+      {
+        "EmpID": 5503740,
+        "EmpName": "Pechetti Chandana"
+      },
+      {
+        "EmpID": 5503360,
+        "EmpName": "Faheem Mohammad"
+      },
+      {
+        "EmpID": 5503851,
+        "EmpName": "Prachi Subhash Yenugwar"
+      },
+      {
+        "EmpID": 5503557,
+        "EmpName": "Ganta Sneha"
+      },
+      {
+        "EmpID": 5502677,
+        "EmpName": "Vishal Bathini"
+      },
+      {
+        "EmpID": 5504254,
+        "EmpName": "Suresh Pandi P"
+      },
+      {
+        "EmpID": 5504303,
+        "EmpName": "Manjunath Kodipeta"
+      },
+      {
+        "EmpID": NaN,
+        "EmpName": "Arun Peddi"
+      },
+      {
+        "EmpID": 5502949,
+        "EmpName": "Santhosh Pendyala"
+      },
+      {
+        "EmpID": 5502200,
+        "EmpName": "Kaushik N"
+      },
+      {
+        "EmpID": 5504703,
+        "EmpName": "Matte Kiran Kumar"
+      },
+      {
+        "EmpID": 5502143,
+        "EmpName": "Ratnaprabha Kasde"
+      },
+      {
+        "EmpID": 5502612,
+        "EmpName": "Srilakshmi Sowjanya Kommoju"
+      },
+      {
+        "EmpID": 5502944,
+        "EmpName": "Kranthi Kumar Moparthy"
+      },
+      {
+        "EmpID": 5504642,
+        "EmpName": "Jagadeesh Reddy Guddeti"
+      },
+      {
+        "EmpID": 5504643,
+        "EmpName": "Shaik Sameer"
+      }
+    ]
+  }
+}

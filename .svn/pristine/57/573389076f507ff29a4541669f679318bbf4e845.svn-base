@@ -1,0 +1,83 @@
+﻿<div class="container mt-5" style="max-width: 500px;">
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <h3 class="card-title text-center mb-4">Reset Password</h3>
+
+      <form [formGroup]="requestForm" (ngSubmit)="onSubmit()">
+        <!-- Username -->
+        <div class="mb-3">
+          <label for="username" class="form-label">Username</label>
+          <input
+            type="text"
+            id="username"
+            class="form-control"
+            formControlName="username"
+            [ngClass]="{ 'is-invalid': isSubmitted && f['username'].errors }"
+          />
+          <div class="invalid-feedback" *ngIf="f['username'].errors?.['required']">
+            Username is required.
+          </div>
+        </div>
+
+        <!-- New Password -->
+        <div class="mb-3">
+          <label for="newPassword" class="form-label">New Password</label>
+          <input
+            type="password"
+            id="newPassword"
+            class="form-control"
+            formControlName="newPassword"
+            [ngClass]="{ 'is-invalid': isSubmitted && f['newPassword'].errors }"
+          />
+          <div class="invalid-feedback" *ngIf="f['newPassword'].errors?.['required']">
+            New password is required.
+          </div>
+          <div class="invalid-feedback" *ngIf="f['newPassword'].errors?.['minlength']">
+            New password must be at least 6 characters.
+          </div>
+        </div>
+
+        <!-- Confirm New Password -->
+        <div class="mb-3">
+          <label for="confirmNewPassword" class="form-label"
+            >Confirm New Password</label
+          >
+          <input
+            type="password"
+            id="confirmNewPassword"
+            class="form-control"
+            formControlName="confirmNewPassword"
+            [ngClass]="{
+              'is-invalid': isSubmitted && f['confirmNewPassword'].errors
+            }"
+          />
+          <div class="invalid-feedback" *ngIf="f['confirmNewPassword'].errors?.['required']">
+            Confirmation is required.
+          </div>
+          <div
+            class="invalid-feedback"
+            *ngIf="requestForm.errors?.['mismatch'] && !f['confirmNewPassword'].errors"
+          >
+            Passwords do not match.
+          </div>
+        </div>
+
+        <button class="btn btn-primary d-grid" type="submit">
+          Reset Password
+        </button>
+      </form>
+
+      <!-- Success and Error Messages -->
+      <div *ngIf="message" class="alert alert-success mt-3">
+        {{ message }}
+      </div>
+      <div *ngIf="errorMsg" class="alert alert-danger mt-3">
+        {{ errorMsg }}
+      </div>
+
+      <div class="mt-2 text-center">
+        <a routerLink="/login">Back to Login</a>
+      </div>
+    </div>
+  </div>
+</div>

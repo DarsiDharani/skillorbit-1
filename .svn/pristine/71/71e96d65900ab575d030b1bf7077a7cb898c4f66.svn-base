@@ -1,0 +1,57 @@
+﻿import { Component, OnInit } from '@angular/core';
+import { FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { AuthService } from '../../services/auth.service';
+import { Router } from '@angular/router';
+
+@Component({
+  selector: 'app-register',
+  templateUrl: './register.component.html'
+})
+export class RegisterComponent implements OnInit {
+  registerForm!: FormGroup;
+  isSubmitted = false;
+  errorMsg = '';
+
+  constructor(
+    private fb: FormBuilder,
+    private authService: AuthService,
+    private router: Router
+  ) {}
+
+  ngOnInit(): void {
+    this.registerForm = this.fb.group({
+      username: ['', [Validators.required, Validators.pattern('^[0-9]+$')]],
+      password: ['', [Validators.required, Validators.minLength(6)]],
+      confirmPassword: ['', [Validators.required]]
+    }, { validator: this.passwordMatchValidator });
+  }
+
+  passwordMatchValidator(form: FormGroup) {
+    return form.get('password')!.value === form.get('confirmPassword')!.value
+      ? null
+      : { mismatch: true };
+  }
+
+  get f() {
+    return this.registerForm.controls;
+  }
+
+  onSubmit(): void {
+    this.isSubmitted = true;
+    this.errorMsg = '';
+
+    if (this.registerForm.invalid) {
+      return;
+    }
+
+    const { username, password } = this.registerForm.value;
+    this.authService.register(Number(username), password).subscribe({
+      next: () => {
+        this.router.navigate(['/login']);
+      },
+      error: err => {
+        this.errorMsg = err.error.detail || 'Registration failed.';
+      }
+    });
+  }
+}

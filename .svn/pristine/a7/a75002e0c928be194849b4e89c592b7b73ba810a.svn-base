@@ -1,0 +1,183 @@
+﻿import asyncio
+from datetime import datetime
+
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+import uvicorn
+from fastapi import FastAPI, APIRouter
+import pandas as pd
+import os
+from app.db.models import EmployeeCompetency
+from app.db.session import engine, Base, AsyncSessionLocal
+from app.routers import auth, competency
+
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.PROJECT_VERSION,
+)
+async def create_tables():
+    async with engine.begin() as conn:
+        # run synchronous create_all in the sync context
+        await conn.run_sync(Base.metadata.create_all)
+
+
+
+# Allow CORS from Angular dev server
+origins = [
+    "http://localhost:4200",
+    "http://172.28.202.153:4200",
+    "http://127.0.0.1:4200",
+    "http://localhost:3000",
+    "http://172.28.202.153:3000",
+    "http://127.0.0.1:3000",
+
+]
+# origins=["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+api_router = APIRouter(prefix="/api")
+
+api_router.include_router(auth.router, tags=["auth"])
+api_router.include_router(competency.router, tags=["competency"])
+app.include_router(api_router)
+
+
+# app.include_router(auth.router,  tags=["auth"])
+# app.include_router(competency.router,  tags=["competency"])
+@app.get("/")
+def read_root():
+    return {"msg": "Welcome to MyApp!"}
+
+
+@app.on_event("startup")
+async def load_initial_competency_data():
+    """
+    Read from an Excel file (initial_competency.xlsx) and insert rows
+    into the employee_competency table—only if it’s empty.
+    """
+    print("Base metadata tables:", Base.metadata.tables)
+    print("Is metadata None?", Base.metadata is None)
+    print("Does metadata have create_all?", hasattr(Base.metadata, "create_all"))
+    await create_tables()
+    # async with engine.begin() as conn:
+    #     await conn.run_sync(Base.metadata.create_all)
+    # Path to your Excel file (adjust as needed)
+    excel_path = os.getenv("COMPETENCY_EXCEL_PATH", "C:\\Users\\Z0194393\\Downloads\\Skill Orbit Data.xlsx")
+
+    db: Session = AsyncSessionLocal()
+    try:
+        # If the table exists and has rows, skip loading
+        try:
+            result = await db.execute(select(func.count()).select_from(EmployeeCompetency))
+            count = result.scalar_one()
+        except Exception:
+            count = 0
+
+        if count > 0:
+            return
+
+        # If file missing, skip
+        if not os.path.isfile(excel_path):
+            print(f"[startup] Excel file not found: {excel_path}. Skipping load.")
+            return
+
+        # Load Excel into DataFrame
+        df = pd.read_excel(excel_path, "Employee Competency", engine="openpyxl")
+        df = df.rename(columns={
+            "Division": "division",
+            "Department": "department",
+            "Employee ID": "employee_empid",
+            "Employee Name": "employee_name",
+            "Role Specific Competency (MHS)": "role_specific_comp",
+            "Desination": "destination",
+            "Competency": "competency",
+            "Project": "project",
+            "Skill": "skill",
+            "Current Expertise Level": "current_expertise",
+            "Target Expertise Level": "target_expertise",
+            "Target Date": "target_date",
+            "comments": "comments",
+        })
+
+        expected = {
+            "division", "department", "employee_empid", "employee_name",
+            "role_specific_comp", "destination", "competency", "project",
+            "skill", "current_expertise", "target_expertise", "target_date", "comments",
+        }
+        missing = expected - set(df.columns)
+        if missing:
+            print(f"[startup] Missing columns in Excel: {missing}. Skipping load.")
+            return
+
+        def _clean_text(val):
+            return None if pd.isna(val) else str(val)
+
+        loaded = 0
+        for _, row in df.iterrows():
+            raw_emp = row["employee_empid"]
+            if pd.isna(raw_emp):
+                continue
+            try:
+                empid_int = int(raw_emp)
+            except (ValueError, TypeError):
+                print(f"[startup] Invalid Employee ID '{raw_emp}', skipping.")
+                continue
+            empid_str = str(empid_int)
+
+            td = row["target_date"]
+            if pd.isna(td):
+                target_date = None
+            elif isinstance(td, pd.Timestamp):
+                target_date = td.date()
+            elif isinstance(td, str):
+                try:
+                    target_date = datetime.fromisoformat(td).date()
+                except ValueError:
+                    target_date = pd.to_datetime(td).date()
+            else:
+                target_date = td
+
+            comp = EmployeeCompetency(
+                division=_clean_text(row["division"]),
+                department=_clean_text(row["department"]),
+                employee_empid=empid_str,
+                employee_name=_clean_text(row["employee_name"]),
+                role_specific_comp=_clean_text(row["role_specific_comp"]),
+                destination=_clean_text(row["destination"]),
+                competency=_clean_text(row["competency"]),
+                project=_clean_text(row["project"]),
+                skill=_clean_text(row["skill"]),
+                current_expertise=_clean_text(row["current_expertise"]),
+                target_expertise=_clean_text(row["target_expertise"]),
+                target_date=target_date,
+                comments=_clean_text(row["comments"]),
+            )
+            db.add(comp)
+            try:
+                await db.commit()
+                loaded += 1
+            except IntegrityError as e:
+                await db.rollback()
+                print(f"[startup] Failed to insert row for empid={empid_str}: {e}")
+
+        print(f"[startup] Loaded {loaded} rows into employee_competency from '{excel_path}'.")
+    finally:
+        await db.close()
+
+
+def main():
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000)
+
+
+if __name__ == "__main__":
+    main()

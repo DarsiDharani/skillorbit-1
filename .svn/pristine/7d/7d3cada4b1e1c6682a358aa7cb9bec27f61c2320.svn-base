@@ -1,0 +1,78 @@
+// src/app/services/competency.service.ts
+
+import { Injectable } from '@angular/core';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import { environment } from 'src/environments/environment';
+import {
+  CompetencyOut,
+  CompetencyCreate,
+  CompetencyUpdate,
+  CompetenciesWithUser
+} from '../models/competency.model';
+import { AuthService } from './auth.service';
+
+interface BatchSaveRequest {
+  create: CompetencyCreate[];
+  update: CompetencyUpdate[];
+  delete: number[];
+}
+
+@Injectable({
+  providedIn: 'root'
+})
+export class CompetencyService {
+  private apiUrl = `${environment.apiUrl}/competencies/`;
+
+  constructor(
+    private http: HttpClient,
+    private auth: AuthService
+  ) {}
+
+  getAll(): Observable<CompetencyOut[]> {
+    return this.http.get<CompetencyOut[]>(this.apiUrl, {
+      headers: this.auth.getAuthHeaders()
+    });
+  }
+
+  getCompetenciesWithUser(): Observable<CompetenciesWithUser> {
+    return this.http.get<CompetenciesWithUser>(this.apiUrl, {
+      headers: this.auth.getAuthHeaders()
+  });
+}
+
+exportCompetencies(): Observable<Blob> {
+    return this.http.get(`${this.apiUrl}export-manager-data`, {
+      headers: this.auth.getAuthHeaders(),
+      responseType: 'blob'
+  });
+}
+  
+
+  create(payload: CompetencyCreate): Observable<CompetencyOut> {
+    return this.http.post<CompetencyOut>(this.apiUrl, payload, {
+      headers: this.auth.getAuthHeaders()
+    });
+  }
+
+  update(id: number, payload: CompetencyUpdate): Observable<CompetencyOut> {
+    return this.http.put<CompetencyOut>(`${this.apiUrl}${id}`, payload, {
+      headers: this.auth.getAuthHeaders()
+    });
+  }
+
+  delete(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.apiUrl}${id}`, {
+      headers: this.auth.getAuthHeaders()
+    });
+  }
+
+  /** New batch‐save endpoint */
+  batchSave(payload: BatchSaveRequest): Observable<CompetencyOut[]> {
+    return this.http.post<CompetencyOut[]>(
+      `${this.apiUrl}batch`,
+      payload,
+      { headers: this.auth.getAuthHeaders() }
+    );
+  }
+}

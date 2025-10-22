@@ -1,0 +1,23 @@
+﻿# backend/app/schemas/user.py
+
+from pydantic import BaseModel
+from typing import Optional, List
+
+class UserLogin(BaseModel):
+    username: int
+    password: str
+
+class UserOut(BaseModel):
+    username:       int         # the empid
+    employee_name:  Optional[str]  = None
+    manager_name:   Optional[str]  = None
+    role:           str             # either "manager" or "employee"
+    direct_reports: Optional[List[int]] = []  # list of empids under them (if manager)
+
+    class Config:
+        orm_mode = True
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type:   str

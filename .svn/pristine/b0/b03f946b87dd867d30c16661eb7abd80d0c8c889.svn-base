@@ -1,0 +1,10 @@
+﻿from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.session import AsyncSessionLocal
+from fastapi import Depends
+
+async def get_db():
+    """
+    Async generator that yields an AsyncSession and closes it after the request
+    """
+    async with AsyncSessionLocal() as db:
+        yield db

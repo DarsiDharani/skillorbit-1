@@ -1,0 +1,61 @@
+﻿# backend/app/db/models.py
+
+from sqlalchemy import Column, String, Text, Integer, Date, ForeignKey
+from sqlalchemy.orm import relationship
+from datetime import datetime
+
+from app.db.session import Base
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    username = Column(String, primary_key=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    created_at = Column(Date, default=datetime.utcnow)
+
+    managed_reports = relationship(
+        "ManagerEmployee",
+        foreign_keys="[ManagerEmployee.manager_empid]",
+        back_populates="manager_user",
+        cascade="all, delete-orphan",
+    )
+    reports_to = relationship(
+        "ManagerEmployee",
+        foreign_keys="[ManagerEmployee.employee_empid]",
+        back_populates="employee_user",
+        cascade="all, delete-orphan",
+    )
+
+
+class ManagerEmployee(Base):
+    __tablename__ = "manager_employee"
+
+    # Use String to match User.username
+    manager_empid = Column(String, ForeignKey("users.username", ondelete="CASCADE"), nullable=True)
+    manager_name = Column(Text, nullable=False)
+    employee_empid = Column(String, ForeignKey("users.username", ondelete="CASCADE"), primary_key=True)
+    employee_name = Column(Text, nullable=False)
+
+    manager_user = relationship("User", foreign_keys=[manager_empid], back_populates="managed_reports")
+    employee_user = relationship("User", foreign_keys=[employee_empid], back_populates="reports_to")
+
+
+class EmployeeCompetency(Base):
+    __tablename__ = "employee_competency"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    division = Column(Text, nullable=True)
+    department = Column(Text, nullable=True)
+    # Make this String to match users.username
+    employee_empid = Column(String, nullable=False)
+    employee_name = Column(Text, nullable=True)
+    role_specific_comp = Column(Text, nullable=True)
+    destination = Column(Text, nullable=True)
+    competency = Column(Text, nullable=True)
+    project = Column(Text, nullable=True)
+    skill = Column(Text, nullable=True)
+    current_expertise = Column(Text, nullable=True)
+    target_expertise = Column(Text, nullable=True)
+    target_date = Column(Date, nullable=True)
+    comments = Column(Text, nullable=True)

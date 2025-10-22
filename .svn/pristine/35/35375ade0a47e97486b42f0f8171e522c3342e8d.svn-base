@@ -1,0 +1,44 @@
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List, Optional
+from app.db.models import EmployeeCompetency
+from app.schemas.competency import CompetencyCreate, CompetencyUpdate
+from sqlalchemy.future import select
+
+async def get_comp_by_id(db: AsyncSession, comp_id: int) -> Optional[EmployeeCompetency]:
+    result = await db.execute(select(EmployeeCompetency).filter(EmployeeCompetency.id == comp_id))
+    return result.scalars().first()
+
+
+
+
+async def get_all_competencies_for_emps(db: AsyncSession, empids: List[int]) -> List[EmployeeCompetency]:
+    stmt = (
+        select(EmployeeCompetency)
+        .filter(EmployeeCompetency.employee_empid.in_(empids))
+        .order_by(EmployeeCompetency.id.desc())
+    )
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+async def create_competency(db: AsyncSession, obj_in: CompetencyCreate) -> EmployeeCompetency:
+    db_obj = EmployeeCompetency(**obj_in.dict())
+    db.add(db_obj)
+    await db.commit()
+    await db.refresh(db_obj)
+    return db_obj
+
+async def update_competency(db: AsyncSession, db_obj: EmployeeCompetency, obj_in: CompetencyUpdate) -> EmployeeCompetency:
+    data = obj_in.dict(exclude={"id"})
+    for field, val in data.items():
+        setattr(db_obj, field, val)
+    await db.commit()
+    await db.refresh(db_obj)
+    return db_obj
+
+async def delete_competency(db: AsyncSession, comp_db: EmployeeCompetency) -> None:
+    await db.delete(comp_db)
+    await db.commit()
+
+async def get_competency_by_id(db: AsyncSession, comp_id: int) -> Optional[EmployeeCompetency]:
+    result = await db.execute(select(EmployeeCompetency).filter(EmployeeCompetency.id == comp_id))
+    return result.scalars().first()

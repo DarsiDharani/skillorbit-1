@@ -1,0 +1,758 @@
+
+import { Component, OnInit } from '@angular/core';
+import { catchError, finalize, of } from 'rxjs';
+import { Router } from '@angular/router';
+
+import { CompetencyService } from '../../services/competency.service';
+import { AuthService } from '../../services/auth.service';
+import { ChangeDetectorRef } from '@angular/core';
+
+
+import {
+  CompetencyOut,
+  CompetencyCreate,
+  CompetencyUpdate,
+  DirectReport, UserProfile
+} from '../../models/competency.model';
+
+
+
+interface EditableCompetency extends CompetencyOut {
+  isNew?: boolean;
+  isEdited?: boolean;
+}
+interface CompetencySnapshot {
+  teamRows: EditableCompetency[];
+}
+
+type UndoEntry =
+  | { type: 'rowEdit'; rowId: number; previous: EditableCompetency }
+  | { type: 'tableEdit'; snapshot: EditableCompetency[] };
+
+@Component({
+  selector: 'app-competency-list',
+  templateUrl: './competency-list.component.html',
+  styleUrls: ['./competency-list.component.css']
+})
+
+export class CompetencyListComponent implements OnInit {
+  mainNav: 'identifySkills' | 'Training Inventory' | 'Skill Assessment' = 'identifySkills';
+
+  private allRows: CompetencyOut[] = [];
+  myRows: EditableCompetency[] = [];
+  originalMyRows: EditableCompetency[] = [];
+  teamRows: EditableCompetency[] = [];
+  originalTeamRows: EditableCompetency[] = [];
+  deletedIds: number[] = [];
+  currentUser: UserProfile | null = null;
+  errorMsg = '';
+  isSaving = false;
+  isExporting = false;
+  direct_reports: DirectReport[] = []
+  // Flags to show/hide filter panels
+  showMyFilters = false;
+  showTeamFilters = false;
+
+  // My‐table filters
+  filterEmpIds: string[] = [];
+  filterNames: string[] = [];
+  filterDivisions: string[] = [];
+  filterRoleSpec: string[] = [];
+  filterCompetencies: string[] = [];
+  filterSkills: string[] = [];
+  filterCurrentExpertise: string[] = [];
+  filterTargetExpertise: string[] = [];
+  selEmpIds: string[] = [];
+  selNames: string[] = [];
+  selDivisions: string[] = [];
+  selRoleSpec: string[] = [];
+  selCompetencies: string[] = [];
+  selSkills: string[] = [];
+  selCurrentExpertise: string[] = [];
+  selTargetExpertise: string[] = [];
+  filteredMyRows: EditableCompetency[] = [];
+
+  // Team‐table filters
+  teamFilterEmpIds: string[] = [];
+  teamFilterNames: string[] = [];
+  teamFilterDivisions: string[] = [];
+  teamFilterRoleSpec: string[] = [];
+  teamFilterCompetencies: string[] = [];
+  teamFilterSkills: string[] = [];
+  teamFilterCurrentExpertise: string[] = [];
+  teamFilterTargetExpertise: string[] = [];
+  teamSelEmpIds: string[] = [];
+  teamSelNames: string[] = [];
+  teamSelDivisions: string[] = [];
+  teamSelRoleSpec: string[] = [];
+  teamSelCompetencies: string[] = [];
+  teamSelSkills: string[] = [];
+  teamSelCurrentExpertise: string[] = [];
+  teamSelTargetExpertise: string[] = [];
+  teamSeTeamExpertise: string[] = [];
+  filteredTeamRows: EditableCompetency[] = [];
+  previousRowState: { [index: number]: EditableCompetency } = {};
+  loading = true;
+
+
+
+
+  constructor(
+    private compService: CompetencyService,
+    private authService: AuthService,
+    private router: Router,
+    private cdr: ChangeDetectorRef
+
+  ) { }
+
+  selectNav(nav: 'identifySkills' | 'Training Inventory' | 'Skill Assessment') {
+    this.mainNav = nav;
+  }
+  undoStack: UndoEntry[] = [];
+
+  saveRowSnapshot(row: EditableCompetency): void {
+    const snapshot: EditableCompetency = { ...row };
+    this.undoStack.push({
+      type: 'rowEdit',
+      rowId: row.id,
+      previous: snapshot
+    });
+  }
+  saveTableSnapshot(): void {
+    const snapshot = this.teamRows.map(r => ({ ...r }));
+    this.undoStack.push({
+      type: 'tableEdit',
+      snapshot
+    });
+  }
+
+
+  ngOnInit(): void {
+    this.fetchAllRows1()
+
+
+  }
+
+  private history: CompetencySnapshot[] = [];
+
+  public hasHistory(): boolean {
+    console.log(this.history.length)
+    return this.history.length > 0;
+  }
+
+  private cloneRows(rows: EditableCompetency[]): EditableCompetency[] {
+    return rows.map(r => ({ ...r }));
+  }
+
+  public snapshotBeforeChange(): void {
+
+    this.history.push({ teamRows: this.cloneRows(this.teamRows) });
+    console.log(this.history)
+    console.log(this.history.length)
+    this.applyTeamFilter();
+  }
+
+  undo(): void {
+    if (this.undoStack.length === 0) return;
+
+    const last = this.undoStack.pop();
+    if (!last) return;
+
+    if (last.type === 'rowEdit') {
+      const index = this.teamRows.findIndex(r => r.id === last.rowId);
+      if (index >= 0) {
+        this.teamRows[index] = { ...last.previous };
+      }
+    } else if (last.type === 'tableEdit') {
+      this.teamRows = last.snapshot.map(r => ({ ...r }));
+    }
+
+    this.applyTeamFilter?.();  // if you use filtered rows
+    this.cdr.detectChanges();  // ensure UI updates
+  }
+
+  public onFieldChange(row: EditableCompetency, field: keyof EditableCompetency, value: any): void {
+    row.isEdited = true;
+
+    if (field === 'employee_empid') {
+
+      row.employee_name = this.getEmployeeNameById(value);
+      console.log(row.employee_name)
+    }
+    (row[field] as any) = value;
+
+  }
+  public onEditComplete(): void {
+    this.buildTeamFilters();
+    this.applyTeamFilter();
+    this.cdr.detectChanges();
+  }
+  downloadExcel(): void {
+    this.isExporting = true
+    this.compService.exportCompetencies().subscribe(blob => {
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `employee_competency_${this.currentUser?.username}.xlsx`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    }, error => {
+      this.isExporting = false
+      console.error('Download failed', error);
+    });
+    this.isExporting = false
+  }
+  private fetchAllRows1(): void {
+    this.errorMsg = '';
+    this.loading = true;
+    this.compService.getCompetenciesWithUser().subscribe({
+      next: data => {
+        this.loading = false;
+        // console.log(typeof data);         // should be 'object'
+        // console.log(data.user);
+        // response now contains { user, competencies }
+        this.currentUser = data.user;
+
+        this.allRows = data.competencies;
+        this.direct_reports = data.user.direct_reports;
+
+        this.partitionRows();
+        this.buildMyFilters();
+        this.applyMyFilter();
+        this.buildTeamFilters();
+        this.applyTeamFilter();
+
+        this.originalMyRows = this.myRows.map(r => ({ ...r, isNew: false }));
+        this.originalTeamRows = this.teamRows.map(r => ({ ...r, isNew: false }));
+        console.log(this.originalTeamRows)
+        this.deletedIds = [];
+      },
+      error: err => {
+        this.errorMsg = err.error?.detail || 'Failed to load competencies';
+      }
+    });
+  }
+  private partitionRows(): void {
+    if (!this.currentUser) {
+      this.myRows = [];
+      this.teamRows = [];
+      return;
+    }
+    const me = this.currentUser.username.toString();
+    const directIds = this.currentUser.direct_reports.map(d => d.employee_empid.toString());
+    this.myRows = this.allRows
+      .filter(r => r.employee_empid.toString() === me)
+      .map(r => ({ ...r, isNew: false }));
+    console.log(this.currentUser.role)
+    if (this.currentUser.role === 'manager') {
+      console.log("here")
+      this.teamRows = this.allRows
+        .filter(r => directIds.includes(r.employee_empid.toString()) && r.employee_empid.toString() !== me)
+        .map(r => ({ ...r, isNew: false }));
+    } else {
+      this.teamRows = [];
+    }
+    console.log(this.teamRows)
+    console.log("-----------------")
+  }
+
+  private buildMyFilters(): void {
+
+    const getFilterValues = (arr: any[]) => {
+      const uniqueValues = Array.from(new Set(arr));
+      return uniqueValues.length > 1 ? uniqueValues : [];
+    };
+
+    this.filterEmpIds = getFilterValues(this.myRows.map(r => r.employee_empid));
+    this.filterNames = getFilterValues(this.myRows.map(r => r.employee_name));
+    this.filterDivisions = getFilterValues(this.myRows.map(r => r.division));
+    this.filterRoleSpec = getFilterValues(this.myRows.map(r => r.role_specific_comp));
+    this.filterCompetencies = getFilterValues(this.myRows.map(r => r.competency));
+    this.filterSkills = getFilterValues(this.myRows.map(r => r.skill));
+
+    this.filterCurrentExpertise = getFilterValues(this.myRows.map(r => r.current_expertise));
+    this.filterTargetExpertise = getFilterValues(this.myRows.map(r => r.target_expertise));
+  }
+
+  private buildTeamFilters(): void {
+    const getFilterValues = (arr: any[]) => {
+      const uniqueValues = Array.from(new Set(arr));
+      return uniqueValues.length > 1 ? uniqueValues : [];
+    };
+
+    this.teamFilterEmpIds = getFilterValues(this.teamRows.map(r => r.employee_empid));
+    this.teamFilterNames = getFilterValues(this.teamRows.map(r => r.employee_name));
+    this.teamFilterDivisions = getFilterValues(this.teamRows.map(r => r.division));
+    this.teamFilterRoleSpec = getFilterValues(this.teamRows.map(r => r.role_specific_comp));
+    this.teamFilterCompetencies = getFilterValues(this.teamRows.map(r => r.competency));
+    this.teamFilterSkills = getFilterValues(this.teamRows.map(r => r.skill));
+
+    this.teamFilterCurrentExpertise = getFilterValues(this.teamRows.map(r => r.current_expertise));
+    this.teamFilterTargetExpertise = getFilterValues(this.teamRows.map(r => r.target_expertise));
+  }
+
+  applyMyFilter(): void {
+
+    this.filteredMyRows = this.myRows.filter(r => {
+      return (
+        (this.selEmpIds.length === 0 || this.selEmpIds.includes(r.employee_empid)) &&
+        (this.selNames.length === 0 || this.selNames.includes(r.employee_name)) &&
+        (this.selDivisions.length === 0 || this.selDivisions.includes(r.division)) &&
+        (this.selRoleSpec.length === 0 || this.selRoleSpec.includes(r.role_specific_comp)) &&
+        (this.selCompetencies.length === 0 || this.selCompetencies.includes(r.competency)) &&
+        (this.selSkills.length === 0 || this.selSkills.includes(r.skill)) &&
+        (this.selCurrentExpertise.length === 0 || this.selCurrentExpertise.includes(r.current_expertise)) &&
+        (this.selTargetExpertise.length === 0 || this.selTargetExpertise.includes(r.target_expertise))
+      );
+    });
+  }
+
+  applyTeamFilter(): void {
+    console.log("applyfilter")
+    this.filteredTeamRows = this.teamRows.filter(r => {
+      return (
+        (this.teamSelEmpIds.length === 0 || this.teamSelEmpIds.includes(r.employee_empid)) &&
+        (this.teamSelNames.length === 0 || this.teamSelNames.includes(r.employee_name)) &&
+        (this.teamSelDivisions.length === 0 || this.teamSelDivisions.includes(r.division)) &&
+        (this.teamSelRoleSpec.length === 0 || this.teamSelRoleSpec.includes(r.role_specific_comp)) &&
+        (this.teamSelCompetencies.length === 0 || this.teamSelCompetencies.includes(r.competency)) &&
+        (this.teamSelSkills.length === 0 || this.teamSelSkills.includes(r.skill)) &&
+        (this.teamSelCurrentExpertise.length === 0 || this.teamSelCurrentExpertise.includes(r.current_expertise)) &&
+        (this.teamSelTargetExpertise.length === 0 || this.teamSelTargetExpertise.includes(r.target_expertise))
+      );
+    });
+  }
+  // Add helper to generate temporary unique IDs for new rows
+  private tempIdCounter = -1;
+
+
+  addNew(): void {
+    if (!this.isManager()) return;
+    this.saveTableSnapshot();
+    const blank: EditableCompetency = {
+      id: this.tempIdCounter--, // assign temporary unique ID
+      employee_empid: '',
+      employee_name: '',
+      division: '',
+      role_specific_comp: '',
+      competency: '',
+      skill: '',
+      current_expertise: '',
+      target_expertise: '',
+      isNew: true
+    };
+
+    this.teamRows.unshift(blank);
+    this.onEditComplete();
+
+
+  }
+
+  // ----------------------------
+  // 2. SAVE OLD STATE BEFORE EDIT
+  // ----------------------------
+  saveTeamRowState(row: EditableCompetency, rowIndex: number) {
+    const rowId = row.id;
+    if (!rowId && rowId !== 0) {
+      console.warn('Invalid row ID for saveTeamRowState:', row);
+      return;
+    }
+
+
+    console.log('Saving snapshot for row ID:', rowId);
+
+    if (this.previousRowState[rowId] === undefined) {
+      this.previousRowState[rowId] = JSON.parse(JSON.stringify(row));
+      console.log('✔ Snapshot saved:', this.previousRowState[rowId]);
+    } else {
+      console.log('❗ Snapshot already exists for row ID:', rowId);
+    }
+  }
+
+
+  removeTeamRow(row: EditableCompetency, index: number): void {
+    if (!this.isManager()) return;
+    this.saveTableSnapshot();
+    this.deletedIds.push(row.id)
+
+    // Remove the row from UI
+    this.teamRows.splice(index, 1);
+
+    this.onEditComplete();
+  }
+
+  getUniqueEmployeeIdsInRows(): string[] {
+    if (this.currentUser) {
+      const directIds = this.currentUser.direct_reports.map(d => d.employee_empid.toString());
+      return Array.from(new Set(directIds));
+    }
+    return [""]
+  }
+
+  getEmployeeNameById(empid: number): string {
+    if (this.currentUser) {
+      const empidStr = String(empid); // convert to string for comparison
+      const emp = this.currentUser.direct_reports.find(e => e.employee_empid === empidStr);
+      return emp ? emp.employee_name : '';
+    }
+    return ""
+  }
+  saveAll(): void {
+    if (!this.currentUser || !this.isManager()) return;
+    this.isSaving = true;
+    this.errorMsg = '';
+    const toCreate: CompetencyCreate[] = [];
+    const toUpdate: CompetencyUpdate[] = [];
+    for (const row of this.teamRows) {
+      if (row.isNew) {
+        if (!row.employee_empid || row.employee_empid.toString().trim() === '') {
+          continue;
+        }
+        toCreate.push({
+
+          employee_empid: String(row.employee_empid),
+          employee_name: row.employee_name,
+          division: row.division,
+          role_specific_comp: row.role_specific_comp,
+          competency: row.competency,
+          skill: row.skill,
+          current_expertise: row.current_expertise,
+          target_expertise: row.target_expertise
+        });
+      } else if (row.isEdited) {
+        toUpdate.push({
+          id: row.id!,
+          employee_empid: String(row.employee_empid),
+          employee_name: row.employee_name,
+          division: row.division,
+          role_specific_comp: row.role_specific_comp,
+          competency: row.competency,
+          skill: row.skill,
+          current_expertise: row.current_expertise,
+          target_expertise: row.target_expertise
+        });
+      }
+    }
+    const payload = {
+      create: toCreate,
+      update: toUpdate,
+      delete: this.deletedIds
+    };
+    console.log('Saving payload:', JSON.stringify(payload, null, 2));
+    this.compService.batchSave(payload).pipe(
+      catchError(err => {
+        this.errorMsg = 'Save failed';
+        return of([]);
+      }),
+      finalize(() => {
+        this.isSaving = false;
+        this.fetchAllRows1();
+      })
+    ).subscribe(() => {
+      // Reset flags after successful save
+      this.teamRows.forEach(row => {
+        row.isNew = false;
+        row.isEdited = false;
+      });
+    });
+  }
+
+  rowHasMissingOrMismatch(r: EditableCompetency): boolean {
+    const requiredFields = [
+      r.employee_empid,
+      r.employee_name,
+      r.division,
+      r.role_specific_comp,
+      r.competency,
+      r.skill,
+      r.current_expertise,
+      r.target_expertise
+    ];
+
+    const hasMissing = requiredFields.some(field => field === null || field === undefined || field === '');
+
+    const allPresent = !hasMissing;
+
+    const expertiseMismatch = allPresent && r.target_expertise !== r.current_expertise;
+
+    return hasMissing || expertiseMismatch;
+  }
+
+  trackByFn(index: number, item: EditableCompetency): number | string {
+    return item.isNew ? index : item.id!;
+  }
+
+  isManager(): boolean {
+    return this.currentUser?.role === 'manager';
+  }
+
+  logout(): void {
+    this.authService.logout();
+  }
+
+  hasTeamChanges(): boolean {
+    return this.teamRows.some(r => r.isNew) || this.deletedIds.length > 0;
+  }
+
+  toggleMyFilters(): void {
+    this.showMyFilters = !this.showMyFilters;
+  }
+
+  toggleTeamFilters(): void {
+    this.showTeamFilters = !this.showTeamFilters;
+  }
+
+
+  selectAllTeamEmpIds(): void {
+    this.teamSelEmpIds = [...this.teamFilterEmpIds];
+    this.applyTeamFilter();
+  }
+
+  clearAllTeamEmpIds(): void {
+    this.teamSelEmpIds = [];
+    this.applyTeamFilter();
+  }
+
+
+  selectAllMyDivisions(): void {
+    this.selDivisions = [...this.filterDivisions];
+    this.applyMyFilter();
+  }
+  clearAllMyDivisions(): void {
+    this.selDivisions = [];
+    this.applyMyFilter();
+  }
+  selectAllMyRoleSpec(): void {
+    this.selRoleSpec = [...this.filterRoleSpec];
+    this.applyMyFilter();
+  }
+  clearAllMyRoleSpec(): void {
+    this.selRoleSpec = [];
+    this.applyMyFilter();
+  }
+  selectAllMyCompetencies(): void {
+    this.selCompetencies = [...this.filterCompetencies];
+    this.applyMyFilter();
+  }
+  clearAllMyCompetencies(): void {
+    this.selCompetencies = [];
+    this.applyMyFilter();
+  }
+  selectAllMySkills(): void {
+    this.selSkills = [...this.filterSkills];
+    this.applyMyFilter();
+  }
+  clearAllMySkills(): void {
+    this.selSkills = [];
+    this.applyMyFilter();
+  }
+  selectAllMyCurrentExpertise(): void {
+    this.selCurrentExpertise = [...this.filterCurrentExpertise];
+    this.applyMyFilter();
+  }
+  selectAllMyTargetExpertise(): void {
+    this.selTargetExpertise = [...this.filterTargetExpertise];
+    this.applyMyFilter();
+  }
+  clearAllMyCurrentExpertise(): void {
+    this.selCurrentExpertise = [];
+    this.applyMyFilter();
+  }
+  clearAllMyTargetExpertise(): void {
+    this.selTargetExpertise = [];
+    this.applyMyFilter();
+  }
+
+  selectAllTeamNames(): void {
+    this.teamSelNames = [...this.teamFilterNames];
+    this.applyTeamFilter();
+  }
+  clearAllTeamNames(): void {
+    this.teamSelNames = [];
+    this.applyTeamFilter();
+  }
+  selectAllTeamDivisions(): void {
+    this.teamSelDivisions = [...this.teamFilterDivisions];
+    this.applyTeamFilter();
+  }
+  clearAllTeamDivisions(): void {
+    this.teamSelDivisions = [];
+    this.applyTeamFilter();
+  }
+  selectAllTeamRoleSpec(): void {
+    this.teamSelRoleSpec = [...this.teamFilterRoleSpec];
+    this.applyTeamFilter();
+  }
+  clearAllTeamRoleSpec(): void {
+    this.teamSelRoleSpec = [];
+    this.applyTeamFilter();
+  }
+  selectAllTeamCompetencies(): void {
+    this.teamSelCompetencies = [...this.teamFilterCompetencies];
+    this.applyTeamFilter();
+  }
+  clearAllTeamCompetencies(): void {
+    this.teamSelCompetencies = [];
+    this.applyTeamFilter();
+  }
+  selectAllTeamSkills(): void {
+    this.teamSelSkills = [...this.teamFilterSkills];
+    this.applyTeamFilter();
+  }
+  clearAllTeamSkills(): void {
+    this.teamSelSkills = [];
+    this.applyTeamFilter();
+  }
+  selectAllTeamCurrentExpertise(): void {
+    this.teamSelCurrentExpertise = [...this.teamFilterCurrentExpertise];
+    this.applyTeamFilter();
+  }
+  selectAllTeamTargetExpertise(): void {
+    this.teamSelTargetExpertise = [...this.teamFilterTargetExpertise];
+    this.applyTeamFilter();
+  }
+  clearAllTeamCurrentExpertise(): void {
+    this.teamSelCurrentExpertise = [];
+    this.applyTeamFilter();
+  }
+  clearAllTeamTargetExpertise(): void {
+    this.teamSelTargetExpertise = [];
+    this.applyTeamFilter();
+  }
+  onMySkillCheckboxChange(event: Event, skill: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    if (checked) {
+      if (!this.selSkills.includes(skill)) {
+        this.selSkills.push(skill);
+      }
+    } else {
+      this.selSkills = this.selSkills.filter(s => s !== skill);
+    }
+    this.applyMyFilter();
+  }
+
+  onDivisionCheckboxChange(event: Event, value: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    if (checked) {
+      if (!this.selDivisions.includes(value)) {
+        this.selDivisions.push(value);
+      }
+    } else {
+      this.selDivisions = this.selDivisions.filter(v => v !== value);
+    }
+    this.applyMyFilter();
+  }
+
+  onRoleSpecCheckboxChange(event: Event, value: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    if (checked) {
+      if (!this.selRoleSpec.includes(value)) {
+        this.selRoleSpec.push(value);
+      }
+    } else {
+      this.selRoleSpec = this.selRoleSpec.filter(v => v !== value);
+    }
+    this.applyMyFilter();
+  }
+
+  onCompetencyCheckboxChange(event: Event, value: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    if (checked) {
+      if (!this.selCompetencies.includes(value)) {
+        this.selCompetencies.push(value);
+      }
+    } else {
+      this.selCompetencies = this.selCompetencies.filter(v => v !== value);
+    }
+    this.applyMyFilter();
+  }
+
+
+
+  onMyCurrentExCheckboxChange(event: Event, value: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    if (checked) {
+      if (!this.selCurrentExpertise.includes(value)) {
+        this.selCurrentExpertise.push(value);
+      }
+    } else {
+      this.selCurrentExpertise = this.selCurrentExpertise.filter(v => v !== value);
+    }
+    this.applyMyFilter();
+  }
+
+  onMyTargetExCheckboxChange(event: Event, value: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    if (checked) {
+      if (!this.selTargetExpertise.includes(value)) {
+        this.selTargetExpertise.push(value);
+      }
+    } else {
+      this.selTargetExpertise = this.selTargetExpertise.filter(v => v !== value);
+    }
+    this.applyMyFilter();
+  }
+
+  onTeamDivisionCheckboxChange(event: Event, value: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.updateTeamFilterArray('teamSelDivisions', value, checked);
+  }
+
+  onTeamRoleSpecCheckboxChange(event: Event, value: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.updateTeamFilterArray('teamSelRoleSpec', value, checked);
+  }
+
+  onTeamCompetencyCheckboxChange(event: Event, value: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.updateTeamFilterArray('teamSelCompetencies', value, checked);
+  }
+
+  onTeamSkillCheckboxChange(event: Event, value: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.updateTeamFilterArray('teamSelSkills', value, checked);
+  }
+
+  onTeamCurrentExpertiseCheckboxChange(event: Event, value: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.updateTeamFilterArray('teamSelCurrentExpertise', value, checked);
+  }
+  onTeamTargetExpertiseCheckboxChange(event: Event, value: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.updateTeamFilterArray('teamSelTargetExpertise', value, checked);
+  }
+  private updateTeamFilterArray(field: keyof this, value: string, add: boolean): void {
+    const arr = this[field] as string[];
+    if (add) {
+      if (!arr.includes(value)) {
+        arr.push(value);
+      }
+    } else {
+      this[field] = arr.filter(v => v !== value) as any;
+    }
+    this.applyTeamFilter();
+  }
+
+  onEmpIdCheckboxChange(event: Event, value: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.updateFilterArray('teamSelEmpIds', value, checked);
+  }
+
+  onEmpNameCheckboxChange(event: Event, value: string): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.updateFilterArray('teamSelNames', value, checked);
+  }
+
+
+  private updateFilterArray(field: keyof this, value: string, add: boolean): void {
+    const arr = this[field] as string[];
+    if (add) {
+      if (!arr.includes(value)) {
+        arr.push(value);
+      }
+    } else {
+      this[field] = arr.filter(v => v !== value) as any;
+    }
+    this.applyTeamFilter();
+  }
+}

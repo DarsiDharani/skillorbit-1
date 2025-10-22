@@ -1,0 +1,79 @@
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import Table, MetaData, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.deps import get_db
+from app.db.session import engine
+from app.db.models import User
+from app.core.security import decode_access_token
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+# Reflect the table once at module level
+metadata = MetaData()
+async def get_manager_employee_table():
+    async with engine.begin() as conn:
+        # Reflect table inside run_sync
+        await conn.run_sync(metadata.reflect, only=["manager_employee"])
+    # Now metadata is loaded, return Table object
+    return Table("manager_employee", metadata, autoload_with=None)
+
+async def get_current_user(
+    db: AsyncSession = Depends(get_db),
+    token: str = Depends(oauth2_scheme),
+):
+    manager_employee_table = await get_manager_employee_table()
+
+    payload = decode_access_token(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    username = payload.get("sub")
+    if username is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Fetch User by username async
+    stmt = select(User).where(User.username == username)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # Query direct reports async
+    stmt = select(manager_employee_table.c.employee_empid,manager_employee_table.c.employee_name).where(
+        manager_employee_table.c.manager_empid == username
+    )
+    result = await db.execute(stmt)
+    direct_reports = result.mappings().all()
+
+    role = "manager" if direct_reports else "employee"
+
+    stmt = select(manager_employee_table.c.manager_name,manager_employee_table).where(
+        manager_employee_table.c.employee_empid == username
+    )
+    result = await db.execute(stmt)
+    mgr_name_row = result.scalar_one_or_none()
+    manager_name = mgr_name_row if mgr_name_row else None
+
+    stmt = select(manager_employee_table.c.employee_name).where(
+        manager_employee_table.c.employee_empid == username
+    )
+    result = await db.execute(stmt)
+    emp_name_row = result.scalar_one_or_none()
+    employee_name = emp_name_row if emp_name_row else None
+
+    return {
+        "username": username,
+        "role": role,
+        "employee_name": employee_name,
+        "manager_name": manager_name,
+        "direct_reports": direct_reports,
+    }
